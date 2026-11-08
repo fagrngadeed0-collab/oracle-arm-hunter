@@ -1,0 +1,33 @@
+name: "Oracle ARM Capacity Hunter"
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"  # يعمل كل 10 دقائق تلقائياً
+  workflow_dispatch:        # يتيح التشغيل اليدوي بضغطة زر
+
+jobs:
+  provision-arm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Try Create Instance
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          TF_VAR_region: ${{ secrets.OCI_REGION }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+        run: |
+          terraform apply -auto-approve || echo "Capacity limit hit, retrying on next run..."
