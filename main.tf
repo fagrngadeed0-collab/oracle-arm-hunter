@@ -8,15 +8,35 @@ terraform {
   }
 }
 
-variable "tenancy_ocid" { type = string }
-variable "compartment_ocid" { type = string }
-variable "user_ocid" { type = string }
-variable "fingerprint" { type = string }
-variable "private_key" { type = string, sensitive = true }
-variable "region" { type = string }
-variable "ssh_public_key" { type = string }
+variable "tenancy_ocid" {
+  type = string
+}
 
-# متغير الكابينة الديناميكي
+variable "compartment_ocid" {
+  type = string
+}
+
+variable "user_ocid" {
+  type = string
+}
+
+variable "fingerprint" {
+  type = string
+}
+
+variable "private_key" {
+  type      = string
+  sensitive = true
+}
+
+variable "region" {
+  type = string
+}
+
+variable "ssh_public_key" {
+  type = string
+}
+
 variable "fault_domain" {
   type    = string
   default = "FAULT-DOMAIN-1"
@@ -71,7 +91,7 @@ data "oci_core_images" "ubuntu" {
 
 resource "oci_core_instance" "a1" {
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
-  fault_domain        = var.fault_domain  # يتغير ديناميكياً مع كل محاولة
+  fault_domain        = var.fault_domain
   compartment_id      = var.compartment_ocid
   display_name        = "coolify-a1"
   shape               = "VM.Standard.A1.Flex"
