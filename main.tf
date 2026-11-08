@@ -37,7 +37,7 @@ variable "ssh_public_key" {
   type = string
 }
 
-# Always Free A1 limit is 2 OCPU / 12 GB in total, so stay inside it.
+# يمكنك تركها 2 و 12 لزيادة فرصة النجاح، أو تغييرها إلى 4 و 24 للاقتناص الكامل
 variable "ocpus" {
   type    = number
   default = 2
@@ -87,6 +87,7 @@ data "oci_core_images" "ubuntu" {
 
 resource "oci_core_instance" "a1" {
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+  fault_domain        = "FAULT-DOMAIN-2" # <-- إضافة التوجيه الصريح للكابينة رقم 2
   compartment_id      = var.compartment_ocid
   display_name        = "coolify-a1"
   shape               = "VM.Standard.A1.Flex"
