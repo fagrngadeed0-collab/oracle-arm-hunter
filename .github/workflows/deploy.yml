@@ -1,33 +1,92 @@
-name: "Oracle ARM Capacity Hunter"
-
+name: OCI A1 capacity hunter
+ 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"  # يعمل كل 10 دقائق تلقائياً
-  workflow_dispatch:        # يتيح التشغيل اليدوي بضغطة زر
-
+    - cron: "0 */4 * * *"
+ 
+concurrency:
+  group: oci-a1-hunter
+  cancel-in-progress: false
+ 
 jobs:
-  provision-arm:
+  hunt:
     runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+      TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+      TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+      TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+      TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+      TF_VAR_region: ${{ secrets.OCI_REGION }}
+      TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+      OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+      - uses: actions/checkout@v4
+ 
+      - uses: actions/setup-python@v5
         with:
-          terraform_version: 1.5.0
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Try Create Instance
-        env:
-          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
-          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
-          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          TF_VAR_region: ${{ secrets.OCI_REGION }}
-          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
-          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
-          TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          python-version: "3.12"
+ 
+      - name: Install OCI CLI
+        run: pip install oci-cli
+ 
+      - name: Write OCI CLI config
+        shell: bash
         run: |
-          terraform apply -auto-approve || echo "Capacity limit hit, retrying on next run..."
+          mkdir -p ~/.oci
+          printf '%s\n' "$TF_VAR_private_key" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$TF_VAR_user_ocid
+          fingerprint=$TF_VAR_fingerprint
+          tenancy=$TF_VAR_tenancy_ocid
+          region=$TF_VAR_region
+          key_file=$HOME/.oci/key.pem
+          EOF
+ 
+      - name: Check whether the instance already exists
+        id: check
+        shell: bash
+        run: |
+          COUNT=$(oci compute instance list \
+            --compartment-id "$TF_VAR_compartment_ocid" \
+            --display-name coolify-a1 \
+            --query "length(data[?\"lifecycle-state\"!='TERMINATED'])" \
+            --raw-output || true)
+          COUNT=${COUNT:-0}
+          echo "Existing coolify-a1 instances: $COUNT"
+          if [ "$COUNT" != "0" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+ 
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.check.outputs.exists == 'false'
+ 
+      - name: Terraform init
+        if: steps.check.outputs.exists == 'false'
+        run: terraform init -input=false
+ 
+      - name: Retry until capacity is available
+        if: steps.check.outputs.exists == 'false'
+        shell: bash
+        run: |
+          for i in $(seq 1 55); do
+            echo "=== attempt $i at $(date -u) ==="
+            if terraform apply -auto-approve -input=false 2>&1 | tee apply.log; then
+              echo "SUCCESS - instance created"
+              terraform output -raw public_ip
+              exit 0
+            fi
+            if grep -qi "Too many requests" apply.log; then
+              sleep 600
+            else
+              sleep 240
+            fi
+          done
+          echo "No capacity this round; the next scheduled run will try again."
+          exit 0
