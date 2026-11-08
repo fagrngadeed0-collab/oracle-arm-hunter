@@ -22,6 +22,7 @@ jobs:
       TF_VAR_region: ${{ secrets.OCI_REGION }}
       TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
       OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -71,24 +72,32 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: terraform init -input=false
 
-      - name: Retry until capacity is available
+      - name: Retry until capacity is available (With Dynamic FD Rotation)
         if: steps.check.outputs.exists == 'false'
         shell: bash
         run: |
           for i in $(seq 1 55); do
-            echo "=== attempt $i at $(date -u) ==="
+            # اختيار كابينة عشوائية بين 1 و 3 مع كل محاولة داخل الدورة
+            FD_NUM=$(( ( RANDOM % 3 ) + 1 ))
+            export TF_VAR_fault_domain="FAULT-DOMAIN-${FD_NUM}"
+
+            echo "=== Attempt $i at $(date -u) [Targeting FAULT-DOMAIN-${FD_NUM}] ==="
             if terraform apply -auto-approve -input=false 2>&1 | tee apply.log; then
               echo "SUCCESS - instance created"
               terraform output -raw public_ip
               exit 0
             fi
+
             if grep -qE "401-NotAuthenticated|NotAuthorizedOrNotFound" apply.log; then
               echo "Authentication error - check the GitHub secrets"
               exit 1
             fi
+
             if grep -qi "Too many requests" apply.log; then
+              echo "Rate limit reached. Sleeping 10 minutes..."
               sleep 600
             else
+              echo "Capacity limit hit. Retrying in 4 minutes..."
               sleep 240
             fi
           done
