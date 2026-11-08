@@ -1,14 +1,14 @@
 name: OCI A1 capacity hunter
- 
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 */4 * * *"
- 
+
 concurrency:
   group: oci-a1-hunter
   cancel-in-progress: false
- 
+
 jobs:
   hunt:
     runs-on: ubuntu-latest
@@ -24,14 +24,14 @@ jobs:
       OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
     steps:
       - uses: actions/checkout@v4
- 
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
- 
+
       - name: Install OCI CLI
         run: pip install oci-cli
- 
+
       - name: Write OCI CLI config
         shell: bash
         run: |
@@ -46,7 +46,7 @@ jobs:
           region=$TF_VAR_region
           key_file=$HOME/.oci/key.pem
           EOF
- 
+
       - name: Check whether the instance already exists
         id: check
         shell: bash
@@ -63,14 +63,14 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
- 
+
       - uses: hashicorp/setup-terraform@v3
         if: steps.check.outputs.exists == 'false'
- 
+
       - name: Terraform init
         if: steps.check.outputs.exists == 'false'
         run: terraform init -input=false
- 
+
       - name: Retry until capacity is available
         if: steps.check.outputs.exists == 'false'
         shell: bash
@@ -81,6 +81,10 @@ jobs:
               echo "SUCCESS - instance created"
               terraform output -raw public_ip
               exit 0
+            fi
+            if grep -qiE "401|NotAuthenticated|NotAuthorizedOrNotFound" apply.log; then
+              echo "Authentication error - check the GitHub secrets"
+              exit 1
             fi
             if grep -qi "Too many requests" apply.log; then
               sleep 600
