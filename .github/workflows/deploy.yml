@@ -82,7 +82,7 @@ jobs:
               terraform output -raw public_ip
               exit 0
             fi
-            if grep -qiE "401|NotAuthenticated|NotAuthorizedOrNotFound" apply.log; then
+            if grep -qE "401-NotAuthenticated|NotAuthorizedOrNotFound" apply.log; then
               echo "Authentication error - check the GitHub secrets"
               exit 1
             fi
