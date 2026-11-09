@@ -37,11 +37,13 @@ variable "ssh_public_key" {
   type = string
 }
 
+# Optional fault domain. null means "let Oracle choose".
 variable "fault_domain" {
   type    = string
-  default = "FAULT-DOMAIN-1"
+  default = null
 }
 
+# Always Free A1 limit is 2 OCPU / 12 GB in total.
 variable "ocpus" {
   type    = number
   default = 2
@@ -118,5 +120,6 @@ resource "oci_core_instance" "a1" {
 }
 
 output "public_ip" {
-  value = oci_core_instance.a1.public_ip
+  value     = oci_core_instance.a1.public_ip
+  sensitive = true
 }

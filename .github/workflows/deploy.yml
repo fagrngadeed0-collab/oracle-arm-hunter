@@ -68,23 +68,31 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         if: steps.check.outputs.exists == 'false'
 
-      - name: Terraform init
+      - name: Terraform init and validate
         if: steps.check.outputs.exists == 'false'
-        run: terraform init -input=false
+        run: |
+          terraform init -input=false
+          terraform validate
 
-      - name: Retry until capacity is available (With Dynamic FD Rotation)
+      - name: Retry until capacity is available (fault domain rotation)
         if: steps.check.outputs.exists == 'false'
         shell: bash
         run: |
-          for i in $(seq 1 55); do
-            # اختيار كابينة عشوائية بين 1 و 3 مع كل محاولة داخل الدورة
-            FD_NUM=$(( ( RANDOM % 3 ) + 1 ))
-            export TF_VAR_fault_domain="FAULT-DOMAIN-${FD_NUM}"
+          # Rotation: 1) let Oracle choose, 2) FD-1, 3) FD-2, 4) FD-3, then repeat
+          SLOTS=("" "FAULT-DOMAIN-1" "FAULT-DOMAIN-2" "FAULT-DOMAIN-3")
+          UNEXPECTED=0
 
-            echo "=== Attempt $i at $(date -u) [Targeting FAULT-DOMAIN-${FD_NUM}] ==="
+          for i in $(seq 1 55); do
+            FD="${SLOTS[$(( (i - 1) % 4 ))]}"
+            if [ -n "$FD" ]; then
+              export TF_VAR_fault_domain="$FD"
+            else
+              unset TF_VAR_fault_domain
+            fi
+
+            echo "=== Attempt $i at $(date -u) [fault domain: ${FD:-oracle-chooses}] ==="
             if terraform apply -auto-approve -input=false 2>&1 | tee apply.log; then
-              echo "SUCCESS - instance created"
-              terraform output -raw public_ip
+              echo "SUCCESS - instance created. Find the public IP in OCI: Compute > Instances > coolify-a1"
               exit 0
             fi
 
@@ -94,10 +102,20 @@ jobs:
             fi
 
             if grep -qi "Too many requests" apply.log; then
+              UNEXPECTED=0
               echo "Rate limit reached. Sleeping 10 minutes..."
               sleep 600
-            else
+            elif grep -qi "Out of host capacity" apply.log; then
+              UNEXPECTED=0
               echo "Capacity limit hit. Retrying in 4 minutes..."
+              sleep 240
+            else
+              UNEXPECTED=$((UNEXPECTED + 1))
+              echo "Unexpected error ($UNEXPECTED in a row)"
+              if [ "$UNEXPECTED" -ge 3 ]; then
+                echo "Stopping: this is not a capacity problem, check the log above."
+                exit 1
+              fi
               sleep 240
             fi
           done
